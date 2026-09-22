@@ -1,0 +1,25 @@
+name: WorkBuddy 每日签到
+
+on:
+  schedule:
+    # 北京时间 10:00 = UTC 02:00（GitHub cron 用 UTC，且可能有数分钟~数十分钟延迟，对签到无影响）
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}   # 允许在 Actions 页面手动点 "Run workflow" 测试
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run checkin
+        env:
+          WORKBUDDY_TOKEN: ${{ secrets.WORKBUDDY_TOKEN }}
+        run: python checkin.py
