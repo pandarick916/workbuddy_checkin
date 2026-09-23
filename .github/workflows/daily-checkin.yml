@@ -50,8 +50,11 @@ jobs:
 
       # 心跳：每天只提交一次（同一天再跑不会产生新提交）。
       # 这一步失败不影响签到结果，故 continue-on-error。
+      # if: always() 确保「签到步骤失败 exit 1」也不会跳过心跳——
+      # 否则仓库连续 60 天无活动会被 GitHub 自动停用定时任务。
       - name: Heartbeat (keep schedule alive)
         continue-on-error: true
+        if: always()
         run: |
           today=$(date -u +%F)
           mkdir -p .heartbeat
@@ -64,4 +67,5 @@ jobs:
           git config user.email "workbuddy-bot@users.noreply.github.com"
           git add .heartbeat/last_run.txt
           git commit -m "chore(heartbeat): $today"
+          git pull --rebase origin main
           git push
