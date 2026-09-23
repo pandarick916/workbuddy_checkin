@@ -1,10 +1,30 @@
 name: WorkBuddy 每日签到
 
+# ── 为什么不是一个整点跑一次？ ─────────────────────────────
+# GitHub 的 schedule 触发器天生不可靠：
+#   1) 官方文档明确说「高负载时可能延迟」——每个整点整（:00）正是最堵的时候；
+#   2) 极端负载下会整次跳过，不补跑；
+#   3) 延迟量级从几分钟到几十分钟都有，不能假设"10:00 就一定是 10:00"。
+# 所以改成「早间窗口内每 30 分钟试一次，共 8 次」。
+# checkin.py 是幂等的（已签到返回 code=10001 自动跳过），
+# 所以多跑几次只是兜底，绝不会重复领积分。
 on:
   schedule:
-    # 北京时间 10:00 = UTC 02:00（GitHub cron 用 UTC，且可能有数分钟~数十分钟延迟，对签到无影响）
-    - cron: "0 2 * * *"
+    # UTC 01:00–04:30 的每半点和整点 = 北京时间 09:00–12:30，共 8 次。
+    - cron: "0,30 1-4 * * *"
   workflow_dispatch: {}   # 允许在 Actions 页面手动点 "Run workflow" 测试
+
+# ── 为什么要 contents: write？ ─────────────────────────────
+# GitHub 规则：仓库连续 60 天没有任何「活动」时，会自动停用该仓库的定时工作流。
+# 本仓库平时不提交，到第 61 天定时任务就会静默失效。
+# 下面用「心跳提交」每天写一次日期文件，保证仓库永远处于活动状态。
+permissions:
+  contents: write
+
+# 防止多次触发互相踩踏（同一时刻只跑一个，排队不取消）
+concurrency:
+  group: workbuddy-checkin
+  cancel-in-progress: false
 
 jobs:
   checkin:
@@ -23,3 +43,21 @@ jobs:
         env:
           WORKBUDDY_TOKEN: ${{ secrets.WORKBUDDY_TOKEN }}
         run: python checkin.py
+
+      # 心跳：每天只提交一次（同一天再跑不会产生新提交）。
+      # 这一步失败不影响签到结果，故 continue-on-error。
+      - name: Heartbeat (keep schedule alive)
+        continue-on-error: true
+        run: |
+          today=$(date -u +%F)
+          mkdir -p .heartbeat
+          if [ "$(cat .heartbeat/last_run.txt 2>/dev/null)" = "$today" ]; then
+            echo "heartbeat already updated today ($today) — skip commit"
+            exit 0
+          fi
+          echo "$today" > .heartbeat/last_run.txt
+          git config user.name  "workbuddy-bot"
+          git config user.email "workbuddy-bot@users.noreply.github.com"
+          git add .heartbeat/last_run.txt
+          git commit -m "chore(heartbeat): $today"
+          git push
